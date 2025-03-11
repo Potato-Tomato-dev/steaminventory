@@ -26,14 +26,27 @@ export default function Inventory() {
       if (data && data.assets) {
         setItems(data.assets.map((asset) => {
           const description = data.descriptions.find(desc => desc.classid === asset.classid);
+          console.log(asset.assetid)
+          console.log(asset)
           return { ...asset, ...description };
         }));
-        console.log(items);
       }
     } catch (error) {
       console.error("Failed to fetch inventory:", error);
     }
   };
+
+  // const fetchInventory = async (steamId, game) => {
+  //   try {
+  //     const response = await fetch(`/api/inventory?steamId=${steamId}&game=${game}`);
+  //     const data = await response.json();
+  //     return data.assets.filter(item => item.tradable === 1); // Only tradable items
+  //   } catch (error) {
+  //     console.error("Failed to fetch inventory:", error);
+  //     return [];
+  //   }
+  // };
+  
 
   return (
     <div style={{ padding: "20px" }}>

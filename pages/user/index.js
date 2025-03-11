@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import Inventory from "../components/Inventory";
+import Trade from "../components/Trade";
 
 export default function Home() {
   const [user, setUser] = useState(null);
@@ -29,7 +30,8 @@ export default function Home() {
         <div>
           <h2>Welcome, {user.displayName}</h2>
           <button onClick={handleLogout}>Logout</button>
-          <Inventory/>
+          <Inventory />
+          <Trade/>
         </div>
       ) : (
         <a href="/api/auth/steam">
