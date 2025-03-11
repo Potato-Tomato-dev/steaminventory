@@ -18,8 +18,8 @@ const auth = nextConnect()
 passport.use(
   new SteamStrategy(
     {
-      returnURL: "http://localhost:3000/api/auth/steam/return",
-      realm: "http://localhost:3000/",
+      returnURL: "https://steaminventory-omega.vercel.app/api/auth/steam/return",
+      realm: "https://steaminventory-omega.vercel.app/",
       apiKey: "4C36C0BA3B142CBC6238A471DF472BA2", // Replace with your Steam API key
     },
     (identifier, profile, done) => {
