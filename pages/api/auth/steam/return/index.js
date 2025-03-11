@@ -4,6 +4,7 @@ import nextConnect from "next-connect";
 import session from "cookie-session";
 
 // Setup session middleware
+const REDIRECT_URI = process.env.NEXT_PUBLIC_REDIRECT_URI || "http://localhost:3000";
 const auth = nextConnect()
   .use(
     session({
@@ -18,8 +19,8 @@ const auth = nextConnect()
 passport.use(
   new SteamStrategy(
     {
-      returnURL: "https://steaminventory-omega.vercel.app/api/auth/steam/return",
-      realm: "https://steaminventory-omega.vercel.app/",
+      returnURL: `${REDIRECT_URI}/api/auth/steam/return`,
+      realm: `${REDIRECT_URI}`,
       apiKey: "4C36C0BA3B142CBC6238A471DF472BA2", // Replace with your Steam API key
     },
     (identifier, profile, done) => {
