@@ -2,7 +2,7 @@ import { useState, useEffect } from "react";
 import Inventory from "../components/Inventory";
 import Trade from "../components/Trade";
 
-export default function Home() {
+export default function User() {
   const [user, setUser] = useState(null);
   
   useEffect(() => {

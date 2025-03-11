@@ -1,3 +1,9 @@
+import User from './user/index';
+
 export default function Home() {
-  return <h1>Home Page Works!</h1>;
+  return (
+    <div>
+      <User/>
+    </div>
+  )
 }
