@@ -22,6 +22,18 @@ export default function User() {
     await fetch("/api/auth/logout");
     setUser(null); // Reset user state
   };
+  const handleTrade = async (selectedItems) => {
+    console.log("Sending trade for items:", selectedItems);
+
+    const response = await fetch("/api/trade", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ items: selectedItems }),
+    });
+
+    const data = await response.json();
+    console.log("Trade response:", data);
+  };
 
   return (
     <div>
@@ -30,8 +42,8 @@ export default function User() {
         <div>
           <h2>Welcome, {user.displayName}</h2>
           <button onClick={handleLogout}>Logout</button>
-          <Inventory />
-          <Trade/>
+          <Inventory onTrade={handleTrade}  />
+          {/* <Trade/> */}
         </div>
       ) : (
         <a href="/api/auth/steam">

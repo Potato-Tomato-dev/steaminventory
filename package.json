@@ -5,11 +5,13 @@
   "scripts": {
     "dev": "next dev",
     "build": "next build",
-    "start": "next start",
+    "start": "NODE_ENV=production node server.js",
     "lint": "next lint"
   },
+  
   "dependencies": {
     "cookie-session": "^2.1.0",
+    "dotenv": "^16.4.7",
     "express-session": "^1.18.1",
     "next": "^14.2.24",
     "next-auth": "^4.24.11",

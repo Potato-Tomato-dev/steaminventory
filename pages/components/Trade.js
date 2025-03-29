@@ -1,16 +1,36 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
+import Inventory from "../components/Inventory";
 
 export default function Trade() {
-  const [steamId, setSteamId] = useState("");
-  const [tradeUrl, setTradeUrl] = useState("");
   const [items, setItems] = useState([]);
+  const [selectedItems, setSelectedItems] = useState([]);
+  const [recipientSteamId, setRecipientSteamId] = useState(""); // The bot's Steam ID
+
+  useEffect(() => {
+    // Fetch user inventory
+    fetch("/api/inventory")
+      .then((res) => res.json())
+      .then((data) => setItems(data.assets || []));
+  }, []);
+
+  const handleSelectItem = (item) => {
+    setSelectedItems((prev) =>
+      prev.find((i) => i.assetid === item.assetid)
+        ? prev.filter((i) => i.assetid !== item.assetid)
+        : [...prev, item]
+    );
+  };
 
   const sendTrade = async () => {
     const response = await fetch("/api/trade", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ steamId, tradeUrl, items }),
+      body: JSON.stringify({
+        recipientSteamId,
+        items: selectedItems.map((item) => item.assetid),
+      }),
     });
+
     const data = await response.json();
     if (data.success) {
       alert(`Trade Offer Sent: ${data.tradeUrl}`);
@@ -21,14 +41,15 @@ export default function Trade() {
 
   return (
     <div>
-      <h2>Trade System</h2>
-      <input type="text" placeholder="Steam ID" onChange={(e) => setSteamId(e.target.value)} />
-      <input type="text" placeholder="Trade URL" onChange={(e) => setTradeUrl(e.target.value)} />
+      <h2>Trade Items</h2>
+      <input
+        type="text"
+        placeholder="Recipient Steam ID"
+        value={recipientSteamId}
+        onChange={(e) => setRecipientSteamId(e.target.value)}
+      />
+      <Inventory items={items} onSelectItem={handleSelectItem} />
       <button onClick={sendTrade}>Send Trade</button>
-      
-      <p>
-        Don't know your trade URL? Find it <a href="https://steamcommunity.com/id/me/tradeoffers/privacy#trade_offer_access_url" target="_blank" rel="noopener noreferrer">here</a>.
-      </p>
     </div>
   );
 }
