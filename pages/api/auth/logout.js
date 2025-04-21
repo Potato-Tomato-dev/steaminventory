@@ -1,6 +1,6 @@
 export default function handler(req, res) {
     req.session.destroy(() => {
-      res.redirect("/user");
+      res.redirect("/trade");
     });
   }
   

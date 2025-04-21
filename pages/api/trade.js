@@ -1,92 +1,136 @@
-import SteamUser from "steam-user";
-import TradeOfferManager from "steam-tradeoffer-manager";
-import SteamCommunity from "steamcommunity";
+import { client, manager, getBotStatus } from "./bot/index"
 
-import { client,manager } from "../../lib/bot";
-
-export default function handler(req, res) {
+export default async function handler(req, res) {
   if (req.method === "GET") {
-    return res.json({ message: "Bot API is working!" });
+    return res.json({ message: "Bot API is working!" })
   }
 
   if (req.method === "POST") {
-    const { item, userTradeUrl } = req.body; // 'item' comes from req.body
+    const { item, userTradeUrl } = req.body
 
+    // Validate request
     if (!item || !userTradeUrl) {
-      return res.status(400).json({ error: "Missing trade item or trade URL." });
+      return res.status(400).json({ error: "Missing trade items or trade URL." })
     }
-    if (client) {
-        sendTradeOfferToUser(item[0], userTradeUrl, res);
-        client.on("error", (err) => {
-          console.error("❌ Steam login failed:", err);
-          res.status(500).json({ error: "Steam login failed" });
-        });
-      } else {
-      console.log(client);
-      }
+
+    // Check if bot is logged in
+    const botStatus = getBotStatus()
+    if (!botStatus.isLoggedIn || !client || !client.steamID) {
+      return res.status(503).json({
+        error: "Bot is not logged in. Please authenticate the bot first.",
+        botStatus,
+      })
     }
+
+    try {
+      const result = await sendTradeOfferToUser(item, userTradeUrl)
+      return res.json(result)
+    } catch (error) {
+      console.error("❌ Error processing trade:", error)
+      return res.status(500).json({
+        error: error.message || "Failed to process trade offer",
+        details: error.stack,
+      })
+    }
+  }
+
+  // Method not allowed
+  return res.status(405).json({ error: "Method not allowed" })
 }
 
-function sendTradeOfferToUser(item, userTradeUrl, res) {
-  if (!client || !client.steamID) {
-    console.error("❌ Bot is not logged in properly.");
-    return res.status(500).json({ error: "Bot is not logged in properly." });
-  }
+function sendTradeOfferToUser(items, userTradeUrl) {
+  return new Promise((resolve, reject) => {
+    try {
+      // Extract Steam ID and token from trade URL
+      const { steamID64, token } = extractSteamIdAndTokenFromTradeUrl(userTradeUrl)
 
-  try {
-    const { steamID64, token } = extractSteamIdAndTokenFromTradeUrl(userTradeUrl);
-    const offer = token ? manager.createOffer(steamID64, token) : manager.createOffer(steamID64);
+      // Create the trade offer
+      const offer = manager.createOffer(steamID64,token)
 
-    console.log(token);
-    console.log(`Trade Offer Options:`, offer.options);
-    offer.addTheirItem({
-      assetid: item.assetid,
-      appid: item.appid || 570,
-      contextid: 2
-    });
-
-    console.log(`Bot's Steam ID: ${client.steamID.getSteamID64()}`);
-    console.log(`Recipient's Steam ID: ${steamID64}, Using Trade Token: ${token}`);
-    console.log(offer);
-
-    offer.send((err, status) => {
-      if (err) {
-        console.error("❌ Trade Error:", err);
-        return res.status(500).json({ error: "Trade offer failed" });
+      // Set trade token if provided
+      if (token) {
+        offer.setToken(token)
       }
-      console.log(`✅ Trade Sent! Status: ${status}`);
-      return res.json({ success: true, message: "Trade offer sent!", status });
-    });
-    // offer.send();
-  } catch (error) {
-    console.error("❌ Error processing trade:", error.message);
-    return res.status(500).json({ error: "Invalid trade URL or Steam ID." });
-  }
+
+      // Log trade details for debugging
+      console.log(`Creating trade offer:`)
+      console.log(`- Bot's Steam ID: ${client.steamID.getSteamID64()}`)
+      console.log(`- Recipient's Steam ID: ${steamID64}`)
+      console.log(`- Using Trade Token: ${token || "None"}`)
+      console.log(`- Number of items: ${Array.isArray(items) ? items.length : 1}`)
+
+      // Add items to the trade
+      const itemsArray = Array.isArray(items) ? items : [items]
+
+      itemsArray.forEach((item) => {
+        // Determine the correct appid based on the game
+        // CS2 = 730, Dota 2 = 570
+        const appid = item.appid || (item.type && item.type.includes("Dota") ? 570 : 730)
+
+        offer.addTheirItem({
+          assetid: item.assetid,
+          appid: appid,
+          contextid: "2", // Steam inventory context ID (2 is standard for games)
+          amount: item.amount || 1,
+        })
+
+        console.log(`Added item to trade: ${item.name || item.assetid} (${appid})`)
+      })
+      console.log(offer);
+
+      // Send the trade offer
+      offer.send((err, status) => {
+        if (err) {
+          console.error("❌ Trade Error:", err)
+          return reject(new Error(`Trade offer failed: ${err.message}`))
+        }
+
+        console.log(`✅ Trade Sent! Status: ${status}`)
+        return resolve({
+          success: true,
+          message: "Trade offer sent successfully!",
+          status,
+          tradeOfferId: offer.id || null,
+          itemCount: itemsArray.length,
+        })
+      })
+    } catch (error) {
+      console.error("❌ Error creating trade offer:", error)
+      reject(error)
+    }
+  })
 }
 
 function extractSteamIdAndTokenFromTradeUrl(tradeUrl) {
   // Example URL: https://steamcommunity.com/tradeoffer/new/?partner=1009663456&token=2SMnK6T7
-  const steamIdRegex = /partner=([^&]+)/;
-  const tokenRegex = /token=([^&]+)/;
+  const steamIdRegex = /partner=([^&]+)/
+  const tokenRegex = /token=([^&]+)/
 
-  const steamIdMatch = tradeUrl.match(steamIdRegex);
-  const tokenMatch = tradeUrl.match(tokenRegex);
+  const steamIdMatch = tradeUrl.match(steamIdRegex)
+  const tokenMatch = tradeUrl.match(tokenRegex)
 
   if (!steamIdMatch || !steamIdMatch[1]) {
-    throw new Error("Invalid trade URL: SteamID not found.");
+    throw new Error("Invalid trade URL: SteamID not found.")
   }
 
-  let id = steamIdMatch[1];
-  // If id is not already a 17-digit SteamID64, convert from SteamID32
-  if (!/^\d{17}$/.test(id)) {
-    id = convertToSteamID64(id);
-  }
-  const token = tokenMatch ? tokenMatch[1] : null;
+  const partnerId = steamIdMatch[1]
+  // Convert partner ID to SteamID64
+  const steamID64 = convertToSteamID64(partnerId)
+  const token = tokenMatch ? tokenMatch[1] : null
 
-  console.log(`Extracted SteamID: ${id}, Trade Token: ${token}`);
-  return { steamID64: id, token };
+  return { steamID64, token }
 }
 
-function convertToSteamID64(steamID32) {
-  return (BigInt(steamID32) + BigInt("76561197960265728")).toString();
+function convertToSteamID64(partnerId) {
+  // Convert partner ID to SteamID64
+  // Partner ID is the account ID, which needs to be converted to the full SteamID64
+  // SteamID64 = 76561197960265728 + partner ID
+  const steamID64Base = "76561197960265728"
+
+  // Use safer conversion method that works in all Node.js environments
+  const partnerIdNum = Number.parseInt(partnerId, 10)
+  const steamID64 = (Number(steamID64Base) + partnerIdNum).toString()
+
+  console.log(`Converting partner ID ${partnerId} to SteamID64: ${steamID64}`)
+  return steamID64
 }

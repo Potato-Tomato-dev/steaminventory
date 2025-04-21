@@ -27,6 +27,9 @@ export default function Home() {
                 <Link href="#" className="hover:text-yellow-500">
                   HOME
                 </Link>
+                <Link href="/trade" className="hover:text-yellow-500">
+                  TRADE
+                </Link>
                 <Link href="#" className="hover:text-yellow-500">
                   MARKETPLACE
                 </Link>

@@ -38,7 +38,7 @@ handler.get("/return", (req, res, next) => {
 
     req.logIn(user, (err) => {
       if (err) return next(err);
-      return res.redirect("/user"); // Redirect to user page after login
+      return res.redirect("/trade"); // Redirect to user page after login
     });
   })(req, res, next);
 });
