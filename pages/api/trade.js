@@ -9,8 +9,18 @@ export default async function handler(req, res) {
     const { item, userTradeUrl } = req.body
 
     // Validate request
-    if (!item || !userTradeUrl) {
-      return res.status(400).json({ error: "Missing trade items or trade URL." })
+    if (!item) {
+      return res.status(400).json({ error: "Missing trade items." })
+    }
+
+    if (!userTradeUrl) {
+      return res.status(400).json({ error: "Missing trade URL. Please provide your Steam trade URL." })
+    }
+
+    // Validate trade URL format
+    const tradeUrlRegex = /^https:\/\/steamcommunity\.com\/tradeoffer\/new\/\?partner=\d+&token=[a-zA-Z0-9_-]+$/
+    if (!tradeUrlRegex.test(userTradeUrl)) {
+      return res.status(400).json({ error: "Invalid trade URL format. Please provide a valid Steam trade URL." })
     }
 
     // Check if bot is logged in
@@ -23,19 +33,86 @@ export default async function handler(req, res) {
     }
 
     try {
+      // Refresh web session before sending trade
+      await refreshWebSession()
+
       const result = await sendTradeOfferToUser(item, userTradeUrl)
       return res.json(result)
     } catch (error) {
       console.error("❌ Error processing trade:", error)
+
+      // Handle specific error codes
+      let errorMessage = error.message || "Failed to process trade offer"
+
+      // Check for specific Steam error codes
+      if (error.eresult) {
+        switch (error.eresult) {
+          case 15:
+            errorMessage =
+              "Access denied. This could be due to trade restrictions, invalid trade URL, or the bot's session has expired. Please try re-authenticating the bot."
+            break
+          case 16:
+            errorMessage = "Trade offer limit exceeded. Please try again later."
+            break
+          case 25:
+            errorMessage = "Trade hold in effect. Please check your Steam Guard Mobile Authenticator settings."
+            break
+          case 26:
+            errorMessage = "Need to confirm email. Please check your email for Steam Guard confirmation."
+            break
+          default:
+            errorMessage = `Steam error (${error.eresult}): ${errorMessage}`
+        }
+      }
+
       return res.status(500).json({
-        error: error.message || "Failed to process trade offer",
-        details: error.stack,
+        error: errorMessage,
+        code: error.eresult || "unknown",
+        details: process.env.NODE_ENV === "development" ? error.stack : undefined,
       })
     }
   }
 
   // Method not allowed
   return res.status(405).json({ error: "Method not allowed" })
+}
+
+// Function to refresh web session
+function refreshWebSession() {
+  return new Promise((resolve, reject) => {
+    console.log("Refreshing web session...")
+
+    client.webLogOn()
+
+    // Listen for the webSession event
+    const sessionHandler = (sessionID, cookies) => {
+      console.log("✅ Web session refreshed successfully!")
+
+      // Set the cookies for the trade manager
+      manager.setCookies(cookies, (err) => {
+        if (err) {
+          console.error("❌ Failed to set cookies:", err)
+          reject(new Error("Failed to set cookies after refreshing session"))
+          return
+        }
+
+        console.log("✅ Trade Manager cookies updated!")
+        resolve()
+      })
+
+      // Remove the listener to avoid memory leaks
+      client.removeListener("webSession", sessionHandler)
+    }
+
+    // Add the listener
+    client.once("webSession", sessionHandler)
+
+    // Set a timeout in case the event never fires
+    setTimeout(() => {
+      client.removeListener("webSession", sessionHandler)
+      reject(new Error("Timed out while waiting for web session"))
+    }, 30000) // 30 second timeout
+  })
 }
 
 function sendTradeOfferToUser(items, userTradeUrl) {
@@ -45,12 +122,12 @@ function sendTradeOfferToUser(items, userTradeUrl) {
       const { steamID64, token } = extractSteamIdAndTokenFromTradeUrl(userTradeUrl)
 
       // Create the trade offer
-      const offer = manager.createOffer(steamID64,token)
+      const offer = manager.createOffer(userTradeUrl)
 
       // Set trade token if provided
-      if (token) {
-        offer.setToken(token)
-      }
+      // if (token) {
+      //   offer.setToken(token)
+      // }
 
       // Log trade details for debugging
       console.log(`Creating trade offer:`)
@@ -76,24 +153,41 @@ function sendTradeOfferToUser(items, userTradeUrl) {
 
         console.log(`Added item to trade: ${item.name || item.assetid} (${appid})`)
       })
-      console.log(offer);
 
-      // Send the trade offer
-      offer.send((err, status) => {
-        if (err) {
-          console.error("❌ Trade Error:", err)
-          return reject(new Error(`Trade offer failed: ${err.message}`))
-        }
+      // Send the trade offer with retries
+      let retries = 0
+      const maxRetries = 2
 
-        console.log(`✅ Trade Sent! Status: ${status}`)
-        return resolve({
-          success: true,
-          message: "Trade offer sent successfully!",
-          status,
-          tradeOfferId: offer.id || null,
-          itemCount: itemsArray.length,
+      const attemptSend = () => {
+        offer.send((err, status) => {
+          if (err) {
+            console.error(`❌ Trade Error (attempt ${retries + 1}/${maxRetries + 1}):`, err)
+
+            // Check if we should retry
+            if (retries < maxRetries) {
+              retries++
+              console.log(`Retrying... (${retries}/${maxRetries})`)
+
+              // Wait a bit before retrying
+              setTimeout(attemptSend, 3000)
+              return
+            }
+
+            return reject(Object.assign(new Error(`Trade offer failed: ${err.message}`), { eresult: err.eresult }))
+          }
+
+          console.log(`✅ Trade Sent! Status: ${status}`)
+          return resolve({
+            success: true,
+            message: "Trade offer sent successfully!",
+            status,
+            tradeOfferId: offer.id || null,
+            itemCount: itemsArray.length,
+          })
         })
-      })
+      }
+
+      attemptSend()
     } catch (error) {
       console.error("❌ Error creating trade offer:", error)
       reject(error)

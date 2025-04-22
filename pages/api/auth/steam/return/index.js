@@ -46,7 +46,7 @@ auth.get((req, res, next) => {
     req.session.user = user;
 
     // Redirect to /user after login
-    res.redirect("/user");
+    res.redirect("/trade");
   })(req, res, next);
 });
 

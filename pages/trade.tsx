@@ -1,9 +1,23 @@
 "use client"
 
+import type React from "react"
+
 import { useEffect, useState } from "react"
 import Head from "next/head"
 import Link from "next/link"
-import { RefreshCw, Send, LogIn, Search, X } from "lucide-react"
+import {
+  RefreshCw,
+  Send,
+  LogIn,
+  Search,
+  X,
+  Link2,
+  ExternalLink,
+  AlertCircle,
+  CheckCircle2,
+  AlertTriangle,
+  HelpCircle,
+} from "lucide-react"
 import type { SteamInventoryItem, SteamInventoryResponse, AuthResponse } from "../types/steam"
 
 export default function Trade() {
@@ -16,6 +30,10 @@ export default function Trade() {
   const [isLoggedIn, setIsLoggedIn] = useState<boolean>(false)
   const [searchTerm, setSearchTerm] = useState<string>("")
   const [tradeResult, setTradeResult] = useState<{ success: boolean; message: string } | null>(null)
+  const [showTroubleshooting, setShowTroubleshooting] = useState<boolean>(false)
+  const [tradeUrl, setTradeUrl] = useState<string>("")
+  const [tradeUrlError, setTradeUrlError] = useState<string | null>(null)
+  const [showTradeUrlHelp, setShowTradeUrlHelp] = useState<boolean>(false)
 
   useEffect(() => {
     // Check if user is logged in
@@ -30,6 +48,13 @@ export default function Trade() {
       .catch((error) => {
         console.error("Failed to check auth status:", error)
       })
+
+    // Load saved trade URL from localStorage if available
+    const savedTradeUrl = localStorage.getItem("steamTradeUrl")
+    if (savedTradeUrl) {
+      setTradeUrl(savedTradeUrl)
+      validateTradeUrl(savedTradeUrl)
+    }
   }, [])
 
   const handleSteamLogin = () => {
@@ -102,9 +127,49 @@ export default function Trade() {
     )
   }
 
+  const validateTradeUrl = (url: string): boolean => {
+    // Basic validation for Steam trade URL format
+    const tradeUrlRegex = /^https:\/\/steamcommunity\.com\/tradeoffer\/new\/\?partner=\d+&token=[a-zA-Z0-9_-]+$/
+
+    if (!url.trim()) {
+      setTradeUrlError("Trade URL is required")
+      return false
+    }
+
+    if (!tradeUrlRegex.test(url)) {
+      setTradeUrlError("Invalid trade URL format. Please enter a valid Steam trade URL.")
+      return false
+    }
+
+    setTradeUrlError(null)
+    return true
+  }
+
+  const handleTradeUrlChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const newUrl = e.target.value
+    setTradeUrl(newUrl)
+
+    // Don't show error while typing, only validate on blur
+    if (tradeUrlError) {
+      validateTradeUrl(newUrl)
+    }
+  }
+
+  const handleTradeUrlBlur = () => {
+    if (validateTradeUrl(tradeUrl)) {
+      // Save valid trade URL to localStorage
+      localStorage.setItem("steamTradeUrl", tradeUrl)
+    }
+  }
+
   const sendTrade = async () => {
     if (selectedItems.length === 0) {
       setTradeResult({ success: false, message: "Please select at least one item." })
+      return
+    }
+
+    if (!validateTradeUrl(tradeUrl)) {
+      setTradeResult({ success: false, message: "Please enter a valid Steam trade URL." })
       return
     }
 
@@ -117,7 +182,7 @@ export default function Trade() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           item: selectedItems,
-          userTradeUrl: "https://steamcommunity.com/tradeoffer/new/?partner=144127921&token=veNuo9dc",
+          userTradeUrl: tradeUrl,
         }),
       })
 
@@ -212,6 +277,78 @@ export default function Trade() {
               </div>
             ) : (
               <>
+                {/* Trade URL Input */}
+                <div className="bg-gradient-to-r from-gray-900 to-red-900/50 rounded-lg p-6 mb-6">
+                  <div className="flex items-center justify-between mb-4">
+                    <h2 className="text-xl font-bold text-white">Your Steam Trade URL</h2>
+                    <button
+                      onClick={() => setShowTradeUrlHelp(!showTradeUrlHelp)}
+                      className="text-gray-400 hover:text-yellow-500 flex items-center gap-1"
+                    >
+                      <AlertCircle className="w-4 h-4" />
+                      {showTradeUrlHelp ? "Hide Help" : "How to find your Trade URL"}
+                    </button>
+                  </div>
+
+                  {showTradeUrlHelp && (
+                    <div className="bg-gray-800/50 rounded p-4 mb-4 text-gray-300 text-sm">
+                      <h3 className="font-bold text-yellow-500 mb-2">How to find your Steam Trade URL:</h3>
+                      <ol className="list-decimal list-inside space-y-2">
+                        <li>Log in to your Steam account</li>
+                        <li>Click on your profile name in the top-right corner</li>
+                        <li>Select "Inventory" from the dropdown menu</li>
+                        <li>Click on "Trade Offers" in the top-right of your inventory page</li>
+                        <li>Click on "Who can send me Trade Offers?"</li>
+                        <li>Under "Third-Party Sites", you'll find your Trade URL</li>
+                        <li>Click "Copy" and paste it here</li>
+                      </ol>
+                      <div className="mt-3 flex items-center gap-2">
+                        <ExternalLink className="w-4 h-4 text-yellow-500" />
+                        <a
+                          href="https://steamcommunity.com/my/tradeoffers/privacy"
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-yellow-500 hover:underline"
+                        >
+                          Open Steam Trade Offers Settings
+                        </a>
+                      </div>
+                    </div>
+                  )}
+
+                  <div className="relative">
+                    <Link2 className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-500 w-5 h-5" />
+                    <input
+                      type="text"
+                      placeholder="https://steamcommunity.com/tradeoffer/new/?partner=XXXXXXXXX&token=XXXXXXXX"
+                      value={tradeUrl}
+                      onChange={handleTradeUrlChange}
+                      onBlur={handleTradeUrlBlur}
+                      className={`w-full bg-gray-800 border rounded px-10 py-2 text-white focus:outline-none focus:ring-2 ${
+                        tradeUrlError
+                          ? "border-red-500 focus:ring-red-500"
+                          : tradeUrl
+                            ? "border-green-500 focus:ring-green-500"
+                            : "border-gray-700 focus:ring-yellow-500"
+                      }`}
+                    />
+                    {tradeUrl && !tradeUrlError && (
+                      <CheckCircle2 className="absolute right-3 top-1/2 transform -translate-y-1/2 text-green-500 w-5 h-5" />
+                    )}
+                  </div>
+
+                  {tradeUrlError && (
+                    <p className="mt-2 text-red-400 text-sm flex items-center gap-1">
+                      <AlertCircle className="w-4 h-4" />
+                      {tradeUrlError}
+                    </p>
+                  )}
+
+                  <p className="mt-2 text-gray-400 text-sm">
+                    Your trade URL is required to send items. We'll save it for future trades.
+                  </p>
+                </div>
+
                 {/* Game Selection and Controls */}
                 <div className="bg-gradient-to-r from-gray-900 to-red-900/50 rounded-lg p-6 mb-8">
                   <div className="flex flex-col md:flex-row justify-between items-center gap-4">
@@ -243,9 +380,9 @@ export default function Trade() {
                       </button>
                       <button
                         onClick={sendTrade}
-                        disabled={selectedItems.length === 0 || isTrading}
+                        disabled={selectedItems.length === 0 || isTrading || !!tradeUrlError || !tradeUrl}
                         className={`px-4 py-2 rounded flex items-center gap-2 ${
-                          selectedItems.length === 0 || isTrading
+                          selectedItems.length === 0 || isTrading || !!tradeUrlError || !tradeUrl
                             ? "bg-gray-700 text-gray-400 cursor-not-allowed"
                             : "bg-yellow-500 hover:bg-yellow-400 text-black"
                         }`}
@@ -309,6 +446,42 @@ export default function Trade() {
                       }`}
                     >
                       {tradeResult.message}
+                    </div>
+                  )}
+                  {tradeResult && !tradeResult.success && (
+                    <div className="mt-2">
+                      <button
+                        onClick={() => setShowTroubleshooting(!showTroubleshooting)}
+                        className="text-yellow-500 hover:text-yellow-400 text-sm flex items-center gap-1"
+                      >
+                        <HelpCircle className="w-4 h-4" />
+                        {showTroubleshooting ? "Hide troubleshooting tips" : "Show troubleshooting tips"}
+                      </button>
+
+                      {showTroubleshooting && (
+                        <div className="mt-2 bg-gray-800/50 rounded p-4 text-gray-300 text-sm">
+                          <h3 className="font-bold text-yellow-500 mb-2">Troubleshooting Tips:</h3>
+                          <ul className="list-disc list-inside space-y-2">
+                            <li>Make sure your trade URL is correct and up-to-date</li>
+                            <li>Check if you have any trade holds or restrictions on your account</li>
+                            <li>Verify that the bot is properly authenticated (admin may need to re-authenticate)</li>
+                            <li>Ensure your inventory is public and items are tradable</li>
+                            <li>Try refreshing your inventory before trading</li>
+                            <li>If the error persists, try again later or contact support</li>
+                          </ul>
+
+                          <div className="mt-4 p-3 bg-yellow-900/30 border border-yellow-700/30 rounded">
+                            <div className="flex items-start gap-2">
+                              <AlertTriangle className="w-5 h-5 text-yellow-500 flex-shrink-0 mt-0.5" />
+                              <p>
+                                <span className="font-bold text-yellow-500">Note:</span> Steam has various security
+                                measures that can temporarily prevent trades. These include new devices, recent password
+                                changes, or Steam Guard settings.
+                              </p>
+                            </div>
+                          </div>
+                        </div>
+                      )}
                     </div>
                   )}
                 </div>
