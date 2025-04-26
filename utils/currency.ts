@@ -31,3 +31,27 @@ export function convertAndFormatPrice(usdPrice: string | null): string {
   if (!usdPrice) return "N/A"
   return formatMnt(usdToMnt(usdPrice))
 }
+
+/**
+ * Formats a USD value to a readable string with the currency symbol
+ */
+export function formatUsd(amount: number | null): string {
+  if (amount === null) return "N/A"
+  return `$${amount.toFixed(2)}`
+}
+
+/**
+ * Converts a numeric USD price to MNT
+ */
+export function convertUsdToMnt(usdPrice: number | null): number {
+  if (usdPrice === null) return 0
+  return Math.round(usdPrice * USD_TO_MNT_RATE)
+}
+
+/**
+ * Formats a price in both USD and MNT
+ */
+export function formatPriceWithBothCurrencies(usdPrice: number | null): string {
+  if (usdPrice === null) return "N/A"
+  return `${formatUsd(usdPrice)} (${formatMnt(convertUsdToMnt(usdPrice))})`
+}

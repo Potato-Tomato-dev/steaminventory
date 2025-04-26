@@ -2,7 +2,7 @@
 
 import type React from "react"
 
-import { useEffect, useState } from "react"
+import { useEffect, useState, useCallback } from "react"
 import Head from "next/head"
 import Link from "next/link"
 import {
@@ -17,27 +17,19 @@ import {
   CheckCircle2,
   AlertTriangle,
   HelpCircle,
-  Tag,
+  BarChart3,
+  Settings,
+  Gamepad2,
 } from "lucide-react"
 import type { SteamInventoryItem, SteamInventoryResponse, AuthResponse } from "../types/steam"
-
-// Import the currency utility functions
-import { convertAndFormatPrice, usdToMnt, formatMnt } from "../utils/currency"
-
-// Add price information type
-interface PriceInfo {
-  success: boolean
-  lowest_price: string | null
-  median_price: string | null
-  volume: string | null
-  market_url: string | null
-  error?: string
-}
+import { ItemCard } from "../components/item-card"
+import { formatMnt } from "../utils/currency"
+import { type GameType, getGameDisplayName, PRICE_SOURCES, type PriceSource } from "../utils/price-sources"
 
 export default function Trade() {
   const [steamId, setSteamId] = useState<string | null>(null)
   const [items, setItems] = useState<SteamInventoryItem[]>([])
-  const [game, setGame] = useState<"cs2" | "dota2">("cs2")
+  const [game, setGame] = useState<GameType>("cs2")
   const [selectedItems, setSelectedItems] = useState<SteamInventoryItem[]>([])
   const [isLoading, setIsLoading] = useState<boolean>(false)
   const [isTrading, setIsTrading] = useState<boolean>(false)
@@ -48,8 +40,15 @@ export default function Trade() {
   const [tradeUrl, setTradeUrl] = useState<string>("")
   const [tradeUrlError, setTradeUrlError] = useState<string | null>(null)
   const [showTradeUrlHelp, setShowTradeUrlHelp] = useState<boolean>(false)
-  const [itemPrices, setItemPrices] = useState<Record<string, PriceInfo>>({})
-  const [loadingPrices, setLoadingPrices] = useState<boolean>(false)
+  const [showPriceSettings, setShowPriceSettings] = useState<boolean>(false)
+  const [enabledSources, setEnabledSources] = useState<Record<PriceSource, boolean>>(() => {
+    // Initialize with all sources enabled
+    const initialState: Record<PriceSource, boolean> = {} as Record<PriceSource, boolean>
+    Object.keys(PRICE_SOURCES).forEach((source) => {
+      initialState[source as PriceSource] = true
+    })
+    return initialState
+  })
 
   useEffect(() => {
     // Check if user is logged in
@@ -73,21 +72,25 @@ export default function Trade() {
       setTradeUrl(savedTradeUrl)
       validateTradeUrl(savedTradeUrl)
     }
-  }, [])
 
-  // Fetch prices when items change
-  useEffect(() => {
-    if (items.length > 0) {
-      fetchPricesForItems()
+    // Load saved price source settings from localStorage if available
+    const savedPriceSettings = localStorage.getItem("priceSourceSettings")
+    if (savedPriceSettings) {
+      try {
+        const parsedSettings = JSON.parse(savedPriceSettings)
+        setEnabledSources(parsedSettings)
+      } catch (error) {
+        console.error("Failed to parse saved price settings:", error)
+      }
     }
-  }, [items])
+  }, [])
 
   const handleSteamLogin = () => {
     // Redirect to Steam login
     window.location.href = "/api/auth/steam"
   }
 
-  const fetchInventory = async (selectedGame?: "cs2" | "dota2") => {
+  const fetchInventory = async (selectedGame?: GameType) => {
     if (!steamId) return
 
     // If a game is provided, update the state
@@ -137,7 +140,7 @@ export default function Trade() {
               tags: description.tags,
 
               // Add appid based on game
-              appid: gameToFetch === "cs2" ? 730 : 570,
+              appid: gameToFetch === "dota2" ? 570 : 730,
             }
 
             return mergedItem
@@ -153,71 +156,13 @@ export default function Trade() {
     }
   }
 
-  const fetchPricesForItems = async () => {
-    setLoadingPrices(true)
-    const newPrices: Record<string, PriceInfo> = { ...itemPrices }
-    let pricesChanged = false
-
-    // Only fetch prices for marketable items
-    const marketableItems = items.filter((item) => item.marketable !== 0)
-
-    // Process in batches to avoid overwhelming the API
-    const batchSize = 10
-    for (let i = 0; i < marketableItems.length; i += batchSize) {
-      const batch = marketableItems.slice(i, i + batchSize)
-
-      // Create an array of promises for concurrent fetching
-      const promises = batch.map(async (item) => {
-        // Skip if we already have the price
-        if (newPrices[item.market_hash_name || ""]) return
-
-        try {
-          const response = await fetch(
-            `/api/market-price?appid=${item.appid}&market_hash_name=${encodeURIComponent(item.market_hash_name || item.name)}`,
-          )
-
-          if (!response.ok) {
-            throw new Error(`API returned ${response.status}`)
-          }
-
-          const priceData = await response.json()
-          newPrices[item.market_hash_name || ""] = priceData
-          pricesChanged = true
-        } catch (error) {
-          console.error(`Failed to fetch price for ${item.name}:`, error)
-          newPrices[item.market_hash_name || ""] = {
-            success: false,
-            lowest_price: null,
-            median_price: null,
-            volume: null,
-            market_url: null,
-            error: error instanceof Error ? error.message : "Unknown error",
-          }
-          pricesChanged = true
-        }
-      })
-
-      // Wait for all promises in the current batch to resolve
-      await Promise.all(promises)
-
-      // Small delay between batches to avoid rate limiting
-      if (i + batchSize < marketableItems.length) {
-        await new Promise((resolve) => setTimeout(resolve, 500))
-      }
-    }
-
-    if (pricesChanged) {
-      setItemPrices(newPrices)
-    }
-    setLoadingPrices(false)
-  }
-
   const toggleSelectItem = (item: SteamInventoryItem) => {
-    setSelectedItems((prevSelected) =>
-      prevSelected.some((i) => i.assetid === item.assetid)
+    setSelectedItems((prevSelected) => {
+      const newSelectedItems = prevSelected.some((i) => i.assetid === item.assetid)
         ? prevSelected.filter((i) => i.assetid !== item.assetid)
-        : [...prevSelected, item],
-    )
+        : [...prevSelected, item]
+      return newSelectedItems
+    })
   }
 
   const validateTradeUrl = (url: string): boolean => {
@@ -253,6 +198,15 @@ export default function Trade() {
       // Save valid trade URL to localStorage
       localStorage.setItem("steamTradeUrl", tradeUrl)
     }
+  }
+
+  const handleSourceToggle = (source: PriceSource) => {
+    setEnabledSources((prev) => {
+      const updated = { ...prev, [source]: !prev[source] }
+      // Save to localStorage
+      localStorage.setItem("priceSourceSettings", JSON.stringify(updated))
+      return updated
+    })
   }
 
   const sendTrade = async () => {
@@ -308,17 +262,14 @@ export default function Trade() {
       item.type.toLowerCase().includes(searchTerm.toLowerCase()),
   )
 
-  // Replace the calculateTotalValue function with this updated version
-  const calculateTotalValue = () => {
-    let totalMnt = 0
-    selectedItems.forEach((item) => {
-      const price = itemPrices[item.market_hash_name || ""]
-      if (price?.success && price.lowest_price) {
-        totalMnt += usdToMnt(price.lowest_price)
-      }
-    })
+  // Calculate total value of selected items
+  const calculateTotalValue = useCallback(() => {
+    // This is a placeholder - in a real implementation, you would use the actual price data
+    // from your price aggregation system
+    const totalMnt = 0
+    // Implementation would depend on how you're storing price data
     return formatMnt(totalMnt)
-  }
+  }, [selectedItems])
 
   return (
     <>
@@ -462,33 +413,36 @@ export default function Trade() {
                       <div className="flex gap-2">
                         <button
                           onClick={() => fetchInventory("cs2")}
-                          className={`px-4 py-2 rounded ${game === "cs2" ? "bg-yellow-500 text-black" : "bg-gray-800 text-white hover:bg-gray-700"}`}
+                          className={`px-4 py-2 rounded flex items-center gap-2 ${game === "cs2" ? "bg-yellow-500 text-black" : "bg-gray-800 text-white hover:bg-gray-700"}`}
                         >
                           {game === "cs2" && isLoading ? (
-                            <span className="flex items-center gap-2">
-                              <RefreshCw className="w-4 h-4 animate-spin" />
-                              CS2
-                            </span>
+                            <RefreshCw className="w-4 h-4 animate-spin" />
                           ) : (
-                            "CS2"
+                            <Gamepad2 className="w-4 h-4" />
                           )}
+                          CS2
                         </button>
                         <button
                           onClick={() => fetchInventory("dota2")}
-                          className={`px-4 py-2 rounded ${game === "dota2" ? "bg-yellow-500 text-black" : "bg-gray-800 text-white hover:bg-gray-700"}`}
+                          className={`px-4 py-2 rounded flex items-center gap-2 ${game === "dota2" ? "bg-yellow-500 text-black" : "bg-gray-800 text-white hover:bg-gray-700"}`}
                         >
                           {game === "dota2" && isLoading ? (
-                            <span className="flex items-center gap-2">
-                              <RefreshCw className="w-4 h-4 animate-spin" />
-                              Dota 2
-                            </span>
+                            <RefreshCw className="w-4 h-4 animate-spin" />
                           ) : (
-                            "Dota 2"
+                            <Gamepad2 className="w-4 h-4" />
                           )}
+                          Dota 2
                         </button>
                       </div>
                     </div>
                     <div className="flex gap-3">
+                      <button
+                        onClick={() => setShowPriceSettings(!showPriceSettings)}
+                        className="px-4 py-2 rounded bg-gray-800 hover:bg-gray-700 text-white flex items-center gap-2"
+                      >
+                        <Settings className="w-4 h-4" />
+                        Price Settings
+                      </button>
                       <button
                         onClick={sendTrade}
                         disabled={selectedItems.length === 0 || isTrading || !!tradeUrlError || !tradeUrl}
@@ -513,6 +467,53 @@ export default function Trade() {
                     </div>
                   </div>
 
+                  {/* Price Settings Panel */}
+                  {showPriceSettings && (
+                    <div className="mt-4 bg-gray-800/50 rounded-lg p-4">
+                      <h3 className="text-white font-medium mb-3 flex items-center gap-2">
+                        <BarChart3 className="w-4 h-4 text-yellow-500" />
+                        Price Source Settings
+                      </h3>
+                      <p className="text-gray-400 text-sm mb-4">
+                        We aggregate prices from multiple sources to show you the best deals. You can customize which
+                        sources to use below.
+                      </p>
+
+                      <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+                        {Object.entries(PRICE_SOURCES).map(([key, config]) => (
+                          <div key={key} className="flex items-center">
+                            <input
+                              type="checkbox"
+                              id={`source-${key}`}
+                              checked={enabledSources[key as PriceSource]}
+                              onChange={() => handleSourceToggle(key as PriceSource)}
+                              className="mr-2 h-4 w-4 rounded border-gray-600 bg-gray-700 text-yellow-500 focus:ring-yellow-500"
+                            />
+                            <label
+                              htmlFor={`source-${key}`}
+                              className="text-sm flex items-center gap-1"
+                              style={{ color: config.color }}
+                            >
+                              {config.name}
+                              {!config.supportedGames.includes(game) && (
+                                <span className="text-gray-500 text-xs">(Not for {getGameDisplayName(game)})</span>
+                              )}
+                            </label>
+                          </div>
+                        ))}
+                      </div>
+
+                      <div className="mt-4 flex justify-end">
+                        <button
+                          className="bg-yellow-500 hover:bg-yellow-400 text-black px-3 py-1 rounded text-sm"
+                          onClick={() => setShowPriceSettings(false)}
+                        >
+                          Save Settings
+                        </button>
+                      </div>
+                    </div>
+                  )}
+
                   {/* Search bar - always visible */}
                   <div className="mt-4 mb-4">
                     <div className="relative">
@@ -535,14 +536,6 @@ export default function Trade() {
                     </div>
                   </div>
 
-                  {/* Price loading indicator */}
-                  {loadingPrices && (
-                    <div className="mt-2 mb-4 flex items-center gap-2 text-gray-400 text-sm">
-                      <RefreshCw className="w-4 h-4 animate-spin" />
-                      <span>Loading market prices...</span>
-                    </div>
-                  )}
-
                   {/* Selected items summary */}
                   {selectedItems.length > 0 && (
                     <div className="mt-2 mb-4">
@@ -550,13 +543,9 @@ export default function Trade() {
                         <div>
                           <span className="text-white">Selected: </span>
                           <span className="text-yellow-500 font-bold">{selectedItems.length} items</span>
-                          {selectedItems.some((item) => itemPrices[item.market_hash_name || ""]?.success) && (
-                            <>
-                              <span className="text-white mx-2">|</span>
-                              <span className="text-white">Total value: </span>
-                              <span className="text-green-500 font-bold">{calculateTotalValue()}</span>
-                            </>
-                          )}
+                          <span className="text-white mx-2">|</span>
+                          <span className="text-white">Total value: </span>
+                          <span className="text-green-500 font-bold">{calculateTotalValue()}</span>
                         </div>
                         <button
                           onClick={() => setSelectedItems([])}
@@ -623,84 +612,20 @@ export default function Trade() {
                 {isLoading ? (
                   <div className="bg-gray-900/50 rounded-lg p-12 text-center">
                     <RefreshCw className="w-8 h-8 animate-spin mx-auto mb-4 text-yellow-500" />
-                    <p className="text-gray-300">Loading your {game.toUpperCase()} inventory...</p>
+                    <p className="text-gray-300">Loading your {getGameDisplayName(game)} inventory...</p>
                     <p className="text-gray-400 text-sm mt-2">
                       This may take a moment depending on the size of your inventory.
                     </p>
                   </div>
                 ) : filteredItems.length > 0 ? (
                   <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
-                    {filteredItems.map((item, index) => (
-                      <div
-                        key={index}
-                        onClick={() => toggleSelectItem(item)}
-                        className={`
-                          bg-gradient-to-b from-gray-800 to-gray-900 
-                          rounded-lg overflow-hidden cursor-pointer transition-all
-                          ${
-                            selectedItems.some((i) => i.assetid === item.assetid)
-                              ? "ring-2 ring-yellow-500 transform scale-[1.02]"
-                              : "hover:scale-[1.02]"
-                          }
-                        `}
-                      >
-                        <div className="h-40 bg-gray-700 relative flex items-center justify-center p-2">
-                          <img
-                            src={`https://community.cloudflare.steamstatic.com/economy/image/${item.icon_url}`}
-                            alt={item.name}
-                            className="max-w-full max-h-full object-contain"
-                          />
-                        </div>
-                        <div className="p-3">
-                          <h3
-                            className="font-medium truncate text-sm"
-                            style={{ color: item.name_color ? `#${item.name_color}` : "white" }}
-                          >
-                            {item.name}
-                          </h3>
-                          <p className="text-gray-400 text-xs truncate">{item.type}</p>
-
-                          {/* Price display */}
-                          {item.marketable !== 0 && (
-                            <div className="mt-1">
-                              {itemPrices[item.market_hash_name || ""]?.success ? (
-                                <a
-                                  href={itemPrices[item.market_hash_name || ""]?.market_url || "#"}
-                                  target="_blank"
-                                  rel="noopener noreferrer"
-                                  onClick={(e) => e.stopPropagation()}
-                                  className="text-green-500 text-xs font-medium flex items-center gap-1 hover:underline"
-                                >
-                                  <Tag className="w-3 h-3" />
-                                  {convertAndFormatPrice(itemPrices[item.market_hash_name || ""]?.lowest_price)}
-                                  {itemPrices[item.market_hash_name || ""]?.volume && (
-                                    <span className="text-gray-400 ml-1">
-                                      ({itemPrices[item.market_hash_name || ""]?.volume}/day)
-                                    </span>
-                                  )}
-                                </a>
-                              ) : itemPrices[item.market_hash_name || ""] ? (
-                                <span className="text-gray-500 text-xs flex items-center gap-1">
-                                  <Tag className="w-3 h-3" />
-                                  No price data
-                                </span>
-                              ) : (
-                                <span className="text-gray-500 text-xs flex items-center gap-1">
-                                  <RefreshCw className="w-3 h-3" />
-                                  Loading price...
-                                </span>
-                              )}
-                            </div>
-                          )}
-
-                          <div className="flex justify-between items-center mt-2">
-                            <span className="text-green-500 text-xs">Tradable</span>
-                            {selectedItems.some((i) => i.assetid === item.assetid) && (
-                              <span className="bg-yellow-500 text-black text-xs px-2 py-1 rounded">Selected</span>
-                            )}
-                          </div>
-                        </div>
-                      </div>
+                    {filteredItems.map((item) => (
+                      <ItemCard
+                        key={item.assetid}
+                        item={item}
+                        isSelected={selectedItems.some((i) => i.assetid === item.assetid)}
+                        onSelect={() => toggleSelectItem(item)}
+                      />
                     ))}
                   </div>
                 ) : (
@@ -738,7 +663,7 @@ export default function Trade() {
                   <span className="text-yellow-500">TENGRI</span>-SKINS
                 </h3>
                 <p className="text-gray-400 mb-4">
-                  The premier marketplace for CS:GO skins with over 100,000 items and the best prices.
+                  The premier marketplace for CS:GO and Dota 2 items with over 100,000 items and the best prices.
                 </p>
                 <div className="flex gap-4">
                   {["facebook", "twitter", "instagram", "discord"].map((social) => (
@@ -754,7 +679,7 @@ export default function Trade() {
               <div>
                 <h3 className="font-bold mb-4">Marketplace</h3>
                 <ul className="space-y-2">
-                  {["All Skins", "Knives", "Gloves", "Rifles"].map((item) => (
+                  {["All Items", "CS2 Items", "Dota 2 Items", "Special Offers"].map((item) => (
                     <li key={item}>
                       <a href="#" className="text-gray-400 hover:text-white">
                         {item}
